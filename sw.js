@@ -1,7 +1,7 @@
 // Service worker: app-shell cache zodat de app direct opent, ook offline.
 // AI-analyses vereisen uiteraard wel netwerk.
 
-const CACHE = 'plantgezondheid-v1';
+const CACHE = 'plantgezondheid-v2';
 
 const SHELL = [
   './',

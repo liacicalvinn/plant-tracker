@@ -37,9 +37,16 @@ function revokeUrls() {
   objectUrls = [];
 }
 
+// Ionic verplaatst overlays tijdens presenteren/sluiten; direct verwijderen bij
+// didDismiss mist het element soms — daarom met een kleine vertraging opruimen.
+function cleanupOnDismiss(overlay) {
+  overlay.addEventListener('didDismiss', () => setTimeout(() => overlay.remove(), 150));
+}
+
 async function toast(message, color = 'dark', duration = 2400) {
   const t = document.createElement('ion-toast');
   Object.assign(t, { message, color, duration, position: 'top', swipeGesture: 'vertical' });
+  cleanupOnDismiss(t);
   document.body.appendChild(t);
   await t.present();
 }
@@ -55,7 +62,7 @@ function confirmAlert({ header, message, confirmText = 'Verwijderen', color = 'd
         { text: confirmText, role: color === 'danger' ? 'destructive' : 'confirm', handler: () => resolve(true) },
       ],
     });
-    alert.addEventListener('didDismiss', () => alert.remove());
+    cleanupOnDismiss(alert);
     document.body.appendChild(alert);
     alert.present();
   });
@@ -65,7 +72,7 @@ function createModal(innerHTML, opts = {}) {
   const modal = document.createElement('ion-modal');
   Object.assign(modal, opts);
   modal.innerHTML = innerHTML;
-  modal.addEventListener('didDismiss', () => modal.remove());
+  cleanupOnDismiss(modal);
   document.body.appendChild(modal);
   return modal;
 }
@@ -89,8 +96,8 @@ function scoreColorVar(score) {
   return 'var(--ion-color-danger)';
 }
 
-function scoreRing(score, size = 116) {
-  const stroke = 10;
+function scoreRing(score, size = 108) {
+  const stroke = 8;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const off = score == null ? c : c * (1 - score / 100);
@@ -103,8 +110,8 @@ function scoreRing(score, size = 116) {
         stroke="${color}" stroke-width="${stroke}" stroke-linecap="round"
         stroke-dasharray="${c}" stroke-dashoffset="${c}" data-off="${off}"
         transform="rotate(-90 ${size / 2} ${size / 2})" />
-      <text x="50%" y="50%" dy="0.1em" class="ring-score" text-anchor="middle" dominant-baseline="middle">${label}</text>
-      <text x="50%" y="50%" dy="1.9em" class="ring-sub" text-anchor="middle">/ 100</text>
+      <text x="50%" y="50%" dy="0.08em" class="ring-score" text-anchor="middle" dominant-baseline="middle">${label}</text>
+      <text x="50%" y="50%" dy="2.1em" class="ring-sub" text-anchor="middle">/ 100</text>
     </svg>`;
 }
 
@@ -116,7 +123,7 @@ function animateRings(root) {
   });
 }
 
-function sparkline(scores, width = 132, height = 40) {
+function sparkline(scores, width = 148, height = 36) {
   const valid = scores.filter((s) => s != null);
   if (valid.length < 2) return '';
   const pad = 5;
@@ -127,18 +134,37 @@ function sparkline(scores, width = 132, height = 40) {
   const lastColor = scoreColorVar(valid[valid.length - 1]);
   return `
     <svg class="sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-label="Scoreverloop">
-      <polygon points="${pad},${height - pad} ${points.join(' ')} ${last[0]},${height - pad}" fill="${lastColor}" opacity="0.12" />
-      <polyline points="${points.join(' ')}" fill="none" stroke="${lastColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-      <circle cx="${last[0]}" cy="${last[1]}" r="3.5" fill="${lastColor}" />
+      <polyline points="${points.join(' ')}" fill="none" stroke="${lastColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />
+      <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${lastColor}" />
     </svg>`;
 }
 
-function scoreBadge(analysis) {
-  if (!analysis || analysis.gezondheidsscore == null) {
-    return `<ion-badge color="medium" class="score-badge">geen analyse</ion-badge>`;
-  }
+function scorePill(analysis, onPhoto = false) {
+  const score = analysis?.gezondheidsscore;
+  if (score == null) return '';
   const { color } = statusOf(analysis);
-  return `<ion-badge color="${color}" class="score-badge">♥ ${analysis.gezondheidsscore}</ion-badge>`;
+  return `<span class="score-pill${onPhoto ? ' on-photo' : ''}"><span class="dot" style="background: var(--ion-color-${color})"></span>${score}</span>`;
+}
+
+function statusLine(analysis) {
+  if (!analysis) {
+    return `<span class="status-line" style="color: var(--ion-color-medium)"><span class="dot" style="background: var(--ion-color-medium)"></span>Nog geen check</span>`;
+  }
+  const { label, color } = statusOf(analysis);
+  return `<span class="status-line" style="color: var(--ion-color-${color})"><span class="dot" style="background: var(--ion-color-${color})"></span>${label}</span>`;
+}
+
+// Verschil t.o.v. de vorige analyse, zodat het verloop per plant direct zichtbaar is
+function trendLine(entries) {
+  const scores = entries.map((e) => e.analysis?.gezondheidsscore).filter((s) => s != null);
+  if (scores.length < 2) return '';
+  const delta = scores[0] - scores[1];
+  if (delta === 0) {
+    return `<span class="trend neutral"><ion-icon name="remove-outline"></ion-icon>Gelijk gebleven</span>`;
+  }
+  const up = delta > 0;
+  return `<span class="trend ${up ? 'up' : 'down'}">
+    <ion-icon name="${up ? 'trending-up-outline' : 'trending-down-outline'}"></ion-icon>${up ? '+' : ''}${delta} sinds vorige check</span>`;
 }
 
 /* ---------- views ---------- */
@@ -148,28 +174,23 @@ function renderLogin() {
     <ion-content class="login-content" fullscreen>
       <div class="login-wrap">
         <div class="login-hero">
-          <div class="login-leaf">🌿</div>
+          <img class="login-logo" src="icons/icon-192.png" alt="" width="84" height="84" />
           <h1>Plantgezondheid</h1>
-          <p>Jouw persoonlijke plantendokter</p>
+          <p>Volg de gezondheid van je planten</p>
         </div>
-        <ion-card class="login-card">
-          <ion-card-content>
-            <ion-list lines="none">
-              <ion-item>
-                <ion-input id="login-user" label="Gebruikersnaam" label-placement="floating"
-                  autocomplete="username" autocapitalize="off" enterkeyhint="next"></ion-input>
-              </ion-item>
-              <ion-item>
-                <ion-input id="login-pass" label="Wachtwoord" label-placement="floating" type="password"
-                  autocomplete="current-password" enterkeyhint="go"></ion-input>
-              </ion-item>
-            </ion-list>
-            <ion-button id="login-btn" expand="block" size="large" class="ion-margin-top">
-              <ion-icon slot="start" name="leaf-outline"></ion-icon>
-              Inloggen
-            </ion-button>
-          </ion-card-content>
-        </ion-card>
+        <div class="surface-card">
+          <ion-list lines="none">
+            <ion-item>
+              <ion-input id="login-user" label="Gebruikersnaam" label-placement="floating"
+                autocomplete="username" autocapitalize="off" enterkeyhint="next"></ion-input>
+            </ion-item>
+            <ion-item>
+              <ion-input id="login-pass" label="Wachtwoord" label-placement="floating" type="password"
+                autocomplete="current-password" enterkeyhint="go"></ion-input>
+            </ion-item>
+          </ion-list>
+          <ion-button id="login-btn" expand="block" size="large" class="ion-margin-top">Inloggen</ion-button>
+        </div>
       </div>
     </ion-content>`;
 
@@ -192,9 +213,8 @@ function renderLogin() {
 
 async function renderPlants() {
   app.innerHTML = `
-    <ion-header>
+    <ion-header class="ion-no-border">
       <ion-toolbar>
-        <ion-title>🌿 Mijn planten</ion-title>
         <ion-buttons slot="end">
           <ion-button id="btn-settings" aria-label="Instellingen">
             <ion-icon slot="icon-only" name="settings-outline"></ion-icon>
@@ -203,11 +223,15 @@ async function renderPlants() {
       </ion-toolbar>
     </ion-header>
     <ion-content>
+      <div class="page-title">
+        <h1>Planten</h1>
+        <p id="plant-count" class="page-sub"></p>
+      </div>
       <ion-refresher slot="fixed" id="refresher">
         <ion-refresher-content pulling-text="Trek om te verversen"></ion-refresher-content>
       </ion-refresher>
       <div id="plant-grid" class="plant-grid">
-        ${'<div class="plant-card skeleton"><ion-skeleton-text animated class="skel-photo"></ion-skeleton-text><div class="skel-body"><ion-skeleton-text animated style="width:70%"></ion-skeleton-text><ion-skeleton-text animated style="width:40%"></ion-skeleton-text></div></div>'.repeat(4)}
+        ${'<div class="plant-card skeleton"><ion-skeleton-text animated class="skel-photo"></ion-skeleton-text></div>'.repeat(4)}
       </div>
       <ion-fab slot="fixed" vertical="bottom" horizontal="end">
         <ion-fab-button id="btn-add" aria-label="Plant toevoegen">
@@ -231,28 +255,35 @@ async function fillPlantGrid() {
   if (!grid) return;
   const plants = await db.getAllPlants();
 
+  const count = app.querySelector('#plant-count');
+  if (count) count.textContent = plants.length === 0 ? '' : plants.length === 1 ? '1 plant' : `${plants.length} planten`;
+
   if (plants.length === 0) {
     grid.innerHTML = `
       <div class="empty-state">
-        <div class="empty-emoji">🪴</div>
+        <div class="icon-circle"><ion-icon name="leaf-outline"></ion-icon></div>
         <h2>Nog geen planten</h2>
-        <p>Voeg je eerste plant toe met de <strong>+</strong> knop en maak een foto voor een AI-gezondheidscheck.</p>
+        <p>Voeg een plant toe en maak een foto — je krijgt direct een gezondheidsanalyse.</p>
+        <ion-button id="empty-add">
+          <ion-icon slot="start" name="add"></ion-icon>Plant toevoegen
+        </ion-button>
       </div>`;
+    grid.querySelector('#empty-add').addEventListener('click', openAddPlant);
     return;
   }
 
   const cards = await Promise.all(plants.map(async (plant) => {
     const latest = await db.getLatestEntry(plant.id);
-    const photo = latest ? `<img src="${photoUrl(latest.photo)}" alt="" loading="lazy" />` : `<div class="photo-placeholder">🌱</div>`;
-    const meta = latest
-      ? `<span class="card-date">${formatDate(latest.createdAt)}</span>`
-      : `<span class="card-date">nog geen foto</span>`;
+    const photo = latest
+      ? `<img src="${photoUrl(latest.photo)}" alt="" loading="lazy" />`
+      : `<div class="photo-placeholder"><ion-icon name="leaf-outline"></ion-icon></div>`;
     return `
       <button class="plant-card" data-id="${plant.id}">
-        <div class="card-photo">${photo}${scoreBadge(latest?.analysis)}</div>
-        <div class="card-body">
+        ${photo}
+        ${scorePill(latest?.analysis, true)}
+        <div class="card-overlay">
           <span class="card-name">${esc(plant.name)}</span>
-          ${meta}
+          <span class="card-date">${latest ? formatDate(latest.createdAt) : 'Nog geen check'}</span>
         </div>
       </button>`;
   }));
@@ -263,34 +294,42 @@ async function fillPlantGrid() {
 }
 
 function openAddPlant() {
-  const alert = document.createElement('ion-alert');
-  Object.assign(alert, {
-    header: 'Nieuwe plant',
-    inputs: [
-      { name: 'name', type: 'text', placeholder: 'Naam, bijv. Monstera woonkamer', attributes: { autocapitalize: 'sentences', maxlength: 60 } },
-      { name: 'species', type: 'text', placeholder: 'Soort (optioneel)', attributes: { maxlength: 60 } },
-    ],
-    buttons: [
-      { text: 'Annuleer', role: 'cancel' },
-      {
-        text: 'Toevoegen',
-        handler: async (values) => {
-          const name = values.name?.trim();
-          if (!name) {
-            toast('Geef je plant een naam', 'warning');
-            return false;
-          }
-          const plant = await db.addPlant({ name, species: values.species?.trim() ?? '' });
-          toast(`🌱 ${name} toegevoegd`, 'success');
-          location.hash = `#/plant/${plant.id}`;
-          return true;
-        },
-      },
-    ],
+  const modal = createModal(`
+    <ion-content class="ion-padding sheet-content">
+      <div class="sheet-header">
+        <h2>Nieuwe plant</h2>
+        <p>Geef je plant een naam — daarna maak je direct de eerste foto.</p>
+      </div>
+      <ion-list inset lines="none" class="form-list">
+        <ion-item>
+          <ion-input id="np-name" label="Naam" label-placement="floating"
+            placeholder="Bijv. Monstera woonkamer" autocapitalize="sentences" maxlength="60"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-input id="np-species" label="Soort (optioneel)" label-placement="floating"
+            maxlength="60"></ion-input>
+        </ion-item>
+      </ion-list>
+      <ion-button id="np-add" expand="block" size="large">Plant toevoegen</ion-button>
+      <ion-button id="np-cancel" expand="block" fill="clear" color="medium">Annuleer</ion-button>
+    </ion-content>`,
+  { initialBreakpoint: 0.62, breakpoints: [0, 0.62, 0.95], handle: true });
+  modal.present();
+
+  modal.querySelector('#np-cancel').addEventListener('click', () => modal.dismiss());
+  modal.querySelector('#np-add').addEventListener('click', async () => {
+    const name = (modal.querySelector('#np-name').value ?? '').trim();
+    const species = (modal.querySelector('#np-species').value ?? '').trim();
+    if (!name) {
+      toast('Geef je plant een naam', 'warning');
+      return;
+    }
+    const plant = await db.addPlant({ name, species });
+    await modal.dismiss();
+    location.hash = `#/plant/${plant.id}`;
+    // Direct door naar de eerste foto: toevoegen → foto → analyse → opvolgen
+    openAnalyseSheet(plant);
   });
-  alert.addEventListener('didDismiss', () => alert.remove());
-  document.body.appendChild(alert);
-  alert.present();
 }
 
 async function renderPlantDetail(id) {
@@ -302,17 +341,16 @@ async function renderPlantDetail(id) {
   const entries = await db.getEntries(id);
   const latest = entries[0] ?? null;
   const scoresChrono = [...entries].reverse().map((e) => e.analysis?.gezondheidsscore ?? null);
-  const status = latest?.analysis ? statusOf(latest.analysis) : null;
+  const species = plant.species || latest?.analysis?.plantsoort || '';
 
   app.innerHTML = `
-    <ion-header>
+    <ion-header class="ion-no-border">
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-button id="btn-back" aria-label="Terug">
             <ion-icon slot="icon-only" name="chevron-back"></ion-icon>
           </ion-button>
         </ion-buttons>
-        <ion-title>${esc(plant.name)}</ion-title>
         <ion-buttons slot="end">
           <ion-button id="btn-more" aria-label="Meer opties">
             <ion-icon slot="icon-only" name="ellipsis-horizontal"></ion-icon>
@@ -321,29 +359,36 @@ async function renderPlantDetail(id) {
       </ion-toolbar>
     </ion-header>
     <ion-content>
-      <div class="detail-hero">
+      <div class="page-title">
+        <h1>${esc(plant.name)}</h1>
+        ${species ? `<p class="page-sub">${esc(species)}</p>` : ''}
+      </div>
+
+      <div class="surface-card hero-card">
         ${scoreRing(latest?.analysis?.gezondheidsscore ?? null)}
-        <div class="detail-hero-info">
-          ${status ? `<ion-badge color="${status.color}">${status.label}</ion-badge>` : '<ion-badge color="medium">Nog geen analyse</ion-badge>'}
-          ${plant.species ? `<p class="species">${esc(plant.species)}</p>` : latest?.analysis?.plantsoort ? `<p class="species">${esc(latest.analysis.plantsoort)}</p>` : ''}
+        <div class="hero-info">
+          ${statusLine(latest?.analysis)}
+          ${trendLine(entries)}
           ${sparkline(scoresChrono)}
+          ${latest ? `<span class="hero-date">Laatste check: ${formatDate(latest.createdAt)}</span>` : ''}
         </div>
       </div>
 
       <div class="ion-padding-horizontal">
         <ion-button id="btn-analyse" expand="block" size="large">
           <ion-icon slot="start" name="camera-outline"></ion-icon>
-          Nieuwe foto &amp; analyse
+          Nieuwe check
         </ion-button>
       </div>
 
-      <ion-list id="timeline" inset>
-        <ion-list-header><ion-label>Geschiedenis</ion-label></ion-list-header>
-        ${entries.length === 0 ? `
-          <div class="empty-state small">
-            <div class="empty-emoji">📷</div>
-            <p>Maak je eerste foto — de AI vertelt je direct hoe het met <strong>${esc(plant.name)}</strong> gaat.</p>
-          </div>` : entries.map((e) => `
+      ${entries.length === 0 ? `
+        <div class="empty-state small">
+          <div class="icon-circle"><ion-icon name="camera-outline"></ion-icon></div>
+          <p>Maak de eerste foto — je ziet hier daarna het verloop van <strong>${esc(plant.name)}</strong>.</p>
+        </div>` : `
+      <ion-list id="timeline" inset lines="full">
+        <ion-list-header><ion-label>Verloop</ion-label></ion-list-header>
+        ${entries.map((e) => `
           <ion-item-sliding data-entry="${e.id}">
             <ion-item button detail="true" class="timeline-item" data-entry-open="${e.id}">
               <ion-thumbnail slot="start"><img src="${photoUrl(e.photo)}" alt="" loading="lazy" /></ion-thumbnail>
@@ -351,7 +396,7 @@ async function renderPlantDetail(id) {
                 <h3>${e.analysis?.diagnose ? esc(truncate(e.analysis.diagnose, 64)) : 'Geen analyse'}</h3>
                 <p>${formatDate(e.createdAt)}</p>
               </ion-label>
-              ${scoreBadge(e.analysis)}
+              ${scorePill(e.analysis)}
             </ion-item>
             <ion-item-options side="end">
               <ion-item-option color="danger" data-entry-del="${e.id}">
@@ -359,7 +404,7 @@ async function renderPlantDetail(id) {
               </ion-item-option>
             </ion-item-options>
           </ion-item-sliding>`).join('')}
-      </ion-list>
+      </ion-list>`}
       <div class="bottom-spacer"></div>
     </ion-content>`;
 
@@ -376,7 +421,7 @@ async function renderPlantDetail(id) {
   });
   app.querySelectorAll('[data-entry-del]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const ok = await confirmAlert({ header: 'Foto verwijderen?', message: 'Deze foto en analyse worden definitief verwijderd.' });
+      const ok = await confirmAlert({ header: 'Check verwijderen?', message: 'Deze foto en analyse worden definitief verwijderd.' });
       if (ok) {
         await db.deleteEntry(btn.dataset.entryDel);
         toast('Verwijderd', 'medium');
@@ -416,7 +461,7 @@ function openPlantOptions(plant) {
       { text: 'Annuleer', role: 'cancel' },
     ],
   });
-  sheet.addEventListener('didDismiss', () => sheet.remove());
+  cleanupOnDismiss(sheet);
   document.body.appendChild(sheet);
   sheet.present();
 }
@@ -446,15 +491,19 @@ async function openAnalyseSheet(plant) {
     clearInterval(rotator);
     body.innerHTML = `
       <div class="sheet-header">
-        <h2>Nieuwe analyse</h2>
+        <h2>Nieuwe check</h2>
         <p>Maak een duidelijke foto van de hele plant, met goed licht.</p>
       </div>
-      <ion-button id="pick-camera" expand="block" size="large">
-        <ion-icon slot="start" name="camera-outline"></ion-icon> Maak een foto
-      </ion-button>
-      <ion-button id="pick-gallery" expand="block" size="large" fill="outline">
-        <ion-icon slot="start" name="images-outline"></ion-icon> Kies uit galerij
-      </ion-button>`;
+      <button class="pick-option" id="pick-camera">
+        <span class="pick-icon"><ion-icon name="camera-outline"></ion-icon></span>
+        <span class="pick-text"><strong>Maak een foto</strong><small>Gebruik de camera</small></span>
+        <ion-icon class="pick-chevron" name="chevron-forward"></ion-icon>
+      </button>
+      <button class="pick-option" id="pick-gallery">
+        <span class="pick-icon"><ion-icon name="images-outline"></ion-icon></span>
+        <span class="pick-text"><strong>Kies uit galerij</strong><small>Bestaande foto gebruiken</small></span>
+        <ion-icon class="pick-chevron" name="chevron-forward"></ion-icon>
+      </button>`;
     body.querySelector('#pick-camera').addEventListener('click', () => pick(true));
     body.querySelector('#pick-gallery').addEventListener('click', () => pick(false));
   };
@@ -471,10 +520,8 @@ async function openAnalyseSheet(plant) {
     body.innerHTML = `
       <div class="sheet-header"><h2>Klaar voor analyse?</h2></div>
       <img class="preview-img" src="${url}" alt="Voorbeeld van de foto" />
-      <ion-button id="do-analyse" expand="block" size="large">
-        <ion-icon slot="start" name="sparkles-outline"></ion-icon> Analyseer
-      </ion-button>
-      <ion-button id="re-pick" expand="block" fill="clear">Andere foto</ion-button>`;
+      <ion-button id="do-analyse" expand="block" size="large">Analyseer</ion-button>
+      <ion-button id="re-pick" expand="block" fill="clear" color="medium">Andere foto</ion-button>`;
     body.querySelector('#do-analyse').addEventListener('click', analyse);
     body.querySelector('#re-pick').addEventListener('click', () => {
       URL.revokeObjectURL(url);
@@ -497,8 +544,8 @@ async function openAnalyseSheet(plant) {
 
     body.innerHTML = `
       <div class="analyse-state">
-        <div class="pulse-leaf">🌿</div>
-        <h2>Analyseren…</h2>
+        <ion-spinner name="crescent" class="analyse-spinner"></ion-spinner>
+        <h2>Analyseren</h2>
         <p id="analyse-text">${ANALYSE_TEXTS[0]}</p>
       </div>`;
     let i = 0;
@@ -513,17 +560,17 @@ async function openAnalyseSheet(plant) {
       clearInterval(rotator);
       await db.addEntry({ plantId: plant.id, photo: photoBlob, analysis });
       await modal.dismiss();
-      toast('✅ Analyse opgeslagen', 'success');
+      toast('Analyse opgeslagen', 'success');
       renderPlantDetail(plant.id);
     } catch (err) {
       clearInterval(rotator);
       body.innerHTML = `
         <div class="analyse-state">
-          <div class="error-emoji">⚠️</div>
+          <div class="icon-circle danger"><ion-icon name="alert-circle-outline"></ion-icon></div>
           <h2>Analyse mislukt</h2>
           <p class="error-text">${esc(err.message)}</p>
           <ion-button id="retry" expand="block">Opnieuw proberen</ion-button>
-          <ion-button id="save-anyway" expand="block" fill="outline">Foto opslaan zonder analyse</ion-button>
+          <ion-button id="save-anyway" expand="block" fill="clear" color="medium">Foto opslaan zonder analyse</ion-button>
         </div>`;
       body.querySelector('#retry').addEventListener('click', analyse);
       body.querySelector('#save-anyway').addEventListener('click', async () => {
@@ -540,9 +587,8 @@ async function openAnalyseSheet(plant) {
 
 function openEntryDetail(entry, plant) {
   const a = entry.analysis;
-  const status = a ? statusOf(a) : null;
   const modal = createModal(`
-    <ion-header>
+    <ion-header class="ion-no-border">
       <ion-toolbar>
         <ion-title>${esc(plant.name)}</ion-title>
         <ion-buttons slot="end">
@@ -554,22 +600,19 @@ function openEntryDetail(entry, plant) {
     </ion-header>
     <ion-content class="ion-padding">
       <img class="entry-photo" src="${photoUrl(entry.photo)}" alt="Foto van ${esc(plant.name)}" />
-      <p class="entry-date">${formatDate(entry.createdAt)}</p>
+      <p class="entry-date">${formatDate(entry.createdAt)}${a?.plantsoort ? ` · ${esc(a.plantsoort)}` : ''}</p>
       ${a ? `
-        <div class="entry-score">
-          ${scoreRing(a.gezondheidsscore, 96)}
-          <div>
-            <ion-badge color="${status.color}">${status.label}</ion-badge>
-            ${a.plantsoort ? `<p class="species">${esc(a.plantsoort)}</p>` : ''}
-          </div>
+        <div class="surface-card hero-card compact">
+          ${scoreRing(a.gezondheidsscore, 92)}
+          <div class="hero-info">${statusLine(a)}</div>
         </div>
         ${a.diagnose ? `<h3 class="entry-h">Diagnose</h3><p class="entry-text">${esc(a.diagnose)}</p>` : ''}
         ${a.problemen.length ? `
           <h3 class="entry-h">Problemen</h3>
-          <ul class="entry-list warn">${a.problemen.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+          <ul class="entry-list">${a.problemen.map((p) => `<li><ion-icon name="alert-circle" class="li-warn"></ion-icon><span>${esc(p)}</span></li>`).join('')}</ul>` : ''}
         ${a.advies.length ? `
           <h3 class="entry-h">Advies</h3>
-          <ul class="entry-list ok">${a.advies.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+          <ul class="entry-list">${a.advies.map((t) => `<li><ion-icon name="checkmark-circle" class="li-ok"></ion-icon><span>${esc(t)}</span></li>`).join('')}</ul>` : ''}
       ` : '<p class="entry-text">Voor deze foto is geen analyse beschikbaar.</p>'}
       <div class="bottom-spacer"></div>
     </ion-content>`);
@@ -582,17 +625,17 @@ function openEntryDetail(entry, plant) {
 function renderSettings() {
   const s = getSettings();
   app.innerHTML = `
-    <ion-header>
+    <ion-header class="ion-no-border">
       <ion-toolbar>
         <ion-buttons slot="start">
           <ion-button id="btn-back" aria-label="Terug">
             <ion-icon slot="icon-only" name="chevron-back"></ion-icon>
           </ion-button>
         </ion-buttons>
-        <ion-title>Instellingen</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>
+      <div class="page-title"><h1>Instellingen</h1></div>
       <ion-list inset>
         <ion-list-header><ion-label>Azure AI</ion-label></ion-list-header>
         <ion-item>
@@ -617,25 +660,23 @@ function renderSettings() {
       </ion-list>
 
       <div class="ion-padding-horizontal">
-        <ion-button id="btn-save" expand="block">
-          <ion-icon slot="start" name="save-outline"></ion-icon> Opslaan
-        </ion-button>
-        <ion-button id="btn-test" expand="block" fill="outline">
-          <ion-icon slot="start" name="pulse-outline"></ion-icon> Test verbinding
-        </ion-button>
+        <ion-button id="btn-save" expand="block">Opslaan</ion-button>
+        <ion-button id="btn-test" expand="block" fill="outline">Test verbinding</ion-button>
       </div>
 
-      <ion-card class="info-card">
-        <ion-card-content>
-          <p><strong>🔒 Privé:</strong> je sleutel wordt alleen op dit toestel bewaard, nooit op GitHub.</p>
-          <p><strong>💡 Zo kom je aan een sleutel:</strong> maak in de <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a> een <em>Azure OpenAI</em>-resource, deploy daar een goedkoop vision-model (bijv. <code>gpt-4.1-mini</code> of <code>gpt-4o-mini</code>) en kopieer het endpoint en sleutel 1 hierheen.</p>
-        </ion-card-content>
-      </ion-card>
+      <div class="surface-card info-card">
+        <div class="info-row">
+          <ion-icon name="lock-closed-outline"></ion-icon>
+          <p>Je sleutel wordt alleen op dit toestel bewaard, nooit op GitHub.</p>
+        </div>
+        <div class="info-row">
+          <ion-icon name="information-circle-outline"></ion-icon>
+          <p>Maak in de <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a> een <em>Azure OpenAI</em>-resource, deploy een goedkoop vision-model (bijv. <code>gpt-4.1-mini</code>) en kopieer endpoint en sleutel hierheen.</p>
+        </div>
+      </div>
 
       <div class="ion-padding-horizontal">
-        <ion-button id="btn-logout" expand="block" fill="clear" color="danger">
-          <ion-icon slot="start" name="log-out-outline"></ion-icon> Uitloggen
-        </ion-button>
+        <ion-button id="btn-logout" expand="block" fill="clear" color="danger">Uitloggen</ion-button>
       </div>
       <p class="version-footer">Plantgezondheid · draait volledig op je eigen toestel</p>
       <div class="bottom-spacer"></div>
@@ -670,18 +711,17 @@ function renderSettings() {
     btn.innerHTML = '<ion-spinner name="dots"></ion-spinner>';
     try {
       await testConnection();
-      toast('✅ Verbinding werkt!', 'success');
+      toast('Verbinding werkt', 'success');
     } catch (err) {
       toast(err.message, 'danger', 5000);
     } finally {
       btn.disabled = false;
-      btn.innerHTML = '<ion-icon slot="start" name="pulse-outline"></ion-icon> Test verbinding';
+      btn.innerHTML = 'Test verbinding';
     }
   });
 
   app.querySelector('#btn-logout').addEventListener('click', () => {
     logout();
-    toast('Uitgelogd', 'medium');
     location.hash = '#/login';
   });
 }
