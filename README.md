@@ -11,7 +11,7 @@ Azure AI-gebruik per analyse.
 ## ✨ Functies
 
 - 📷 Foto maken of kiezen uit galerij, automatisch gecomprimeerd
-- 🤖 AI-analyse via Azure OpenAI: gezondheidsscore (0–100), status, diagnose, problemen en advies
+- 🤖 AI-analyse via Azure OpenAI: herkent de soort (en stelt een naam voor bij het toevoegen), gezondheidsscore (0–100), status, diagnose, problemen en advies
 - 📈 Geschiedenis per plant met scoreverloop (sparkline) en tijdlijn
 - 🪴 Meerdere planten beheren
 - 🔐 Simpele login + API-sleutel alleen op je eigen toestel
@@ -45,9 +45,8 @@ een echte app.
 ## 🧭 Gebruik
 
 1. Log in
-2. Voeg een plant toe met de **+** knop
-3. Tik op de plant → **Nieuwe foto & analyse**
-4. Bekijk score, diagnose en advies; elke analyse wordt bewaard in de tijdlijn
+2. Tik op **+** en maak een foto — de AI herkent de soort, stelt een naam voor en doet direct de eerste gezondheidscheck
+3. Volg de plant op via **Nieuwe check**: score, trend, diagnose en advies worden per plant bewaard in het verloop
 
 ## 🛠 Techniek
 

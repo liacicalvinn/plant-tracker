@@ -154,17 +154,23 @@ function statusLine(analysis) {
   return `<span class="status-line" style="color: var(--ion-color-${color})"><span class="dot" style="background: var(--ion-color-${color})"></span>${label}</span>`;
 }
 
-// Verschil t.o.v. de vorige analyse, zodat het verloop per plant direct zichtbaar is
-function trendLine(entries) {
+// Compacte statistieken per plant: aantal checks, gemiddelde score en trend
+function statRow(entries) {
+  if (entries.length === 0) return '';
   const scores = entries.map((e) => e.analysis?.gezondheidsscore).filter((s) => s != null);
-  if (scores.length < 2) return '';
-  const delta = scores[0] - scores[1];
-  if (delta === 0) {
-    return `<span class="trend neutral"><ion-icon name="remove-outline"></ion-icon>Gelijk gebleven</span>`;
-  }
-  const up = delta > 0;
-  return `<span class="trend ${up ? 'up' : 'down'}">
-    <ion-icon name="${up ? 'trending-up-outline' : 'trending-down-outline'}"></ion-icon>${up ? '+' : ''}${delta} sinds vorige check</span>`;
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  const delta = scores.length >= 2 ? scores[0] - scores[1] : null;
+  const trendValue = delta == null
+    ? '<span class="stat-value">–</span>'
+    : delta === 0
+      ? '<span class="stat-value trend neutral">±0</span>'
+      : `<span class="stat-value trend ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</span>`;
+  return `
+    <div class="stat-row">
+      <div class="surface-card stat-tile"><span class="stat-value">${entries.length}</span><span class="stat-label">Checks</span></div>
+      <div class="surface-card stat-tile"><span class="stat-value">${avg ?? '–'}</span><span class="stat-label">Gem. score</span></div>
+      <div class="surface-card stat-tile">${trendValue}<span class="stat-label">Trend</span></div>
+    </div>`;
 }
 
 /* ---------- views ---------- */
@@ -178,18 +184,12 @@ function renderLogin() {
           <h1>Plantgezondheid</h1>
           <p>Volg de gezondheid van je planten</p>
         </div>
-        <div class="surface-card">
-          <ion-list lines="none">
-            <ion-item>
-              <ion-input id="login-user" label="Gebruikersnaam" label-placement="floating"
-                autocomplete="username" autocapitalize="off" enterkeyhint="next"></ion-input>
-            </ion-item>
-            <ion-item>
-              <ion-input id="login-pass" label="Wachtwoord" label-placement="floating" type="password"
-                autocomplete="current-password" enterkeyhint="go"></ion-input>
-            </ion-item>
-          </ion-list>
-          <ion-button id="login-btn" expand="block" size="large" class="ion-margin-top">Inloggen</ion-button>
+        <div class="form-stack">
+          <ion-input id="login-user" class="modern" label="Gebruikersnaam" label-placement="floating" fill="outline"
+            autocomplete="username" autocapitalize="off" enterkeyhint="next"></ion-input>
+          <ion-input id="login-pass" class="modern" label="Wachtwoord" label-placement="floating" fill="outline" type="password"
+            autocomplete="current-password" enterkeyhint="go"></ion-input>
+          <ion-button id="login-btn" expand="block" size="large">Inloggen</ion-button>
         </div>
       </div>
     </ion-content>`;
@@ -293,43 +293,160 @@ async function fillPlantGrid() {
   });
 }
 
+// "Monstera deliciosa (gatenplant)" → "Monstera deliciosa" als naamsuggestie
+function suggestPlantName(species) {
+  if (!species) return '';
+  return species.split('(')[0].trim() || species.trim();
+}
+
+// Plant toevoegen begint met een foto: de AI herkent de soort, stelt een
+// naam voor en de eerste gezondheidscheck wordt meteen opgeslagen.
 function openAddPlant() {
-  const modal = createModal(`
-    <ion-content class="ion-padding sheet-content">
+  const modal = createModal(
+    `<ion-content class="ion-padding sheet-content"><div id="add-body"></div></ion-content>`,
+    { initialBreakpoint: 0.9, breakpoints: [0, 0.9], handle: true },
+  );
+  modal.present();
+  const body = modal.querySelector('#add-body');
+  let photoBlob = null;
+  let analysis = null;
+  let rotator = null;
+  modal.addEventListener('didDismiss', () => clearInterval(rotator));
+
+  const showPicker = () => {
+    clearInterval(rotator);
+    body.innerHTML = `
       <div class="sheet-header">
         <h2>Nieuwe plant</h2>
-        <p>Geef je plant een naam — daarna maak je direct de eerste foto.</p>
+        <p>Begin met een foto — de AI herkent de soort en stelt een naam voor.</p>
       </div>
-      <ion-list inset lines="none" class="form-list">
-        <ion-item>
-          <ion-input id="np-name" label="Naam" label-placement="floating"
-            placeholder="Bijv. Monstera woonkamer" autocapitalize="sentences" maxlength="60"></ion-input>
-        </ion-item>
-        <ion-item>
-          <ion-input id="np-species" label="Soort (optioneel)" label-placement="floating"
-            maxlength="60"></ion-input>
-        </ion-item>
-      </ion-list>
-      <ion-button id="np-add" expand="block" size="large">Plant toevoegen</ion-button>
-      <ion-button id="np-cancel" expand="block" fill="clear" color="medium">Annuleer</ion-button>
-    </ion-content>`,
-  { initialBreakpoint: 0.62, breakpoints: [0, 0.62, 0.95], handle: true });
-  modal.present();
+      <button class="pick-option" id="pick-camera">
+        <span class="pick-icon"><ion-icon name="camera-outline"></ion-icon></span>
+        <span class="pick-text"><strong>Maak een foto</strong><small>Gebruik de camera</small></span>
+        <ion-icon class="pick-chevron" name="chevron-forward"></ion-icon>
+      </button>
+      <button class="pick-option" id="pick-gallery">
+        <span class="pick-icon"><ion-icon name="images-outline"></ion-icon></span>
+        <span class="pick-text"><strong>Kies uit galerij</strong><small>Bestaande foto gebruiken</small></span>
+        <ion-icon class="pick-chevron" name="chevron-forward"></ion-icon>
+      </button>`;
+    body.querySelector('#pick-camera').addEventListener('click', () => pick(true));
+    body.querySelector('#pick-gallery').addEventListener('click', () => pick(false));
+  };
 
-  modal.querySelector('#np-cancel').addEventListener('click', () => modal.dismiss());
-  modal.querySelector('#np-add').addEventListener('click', async () => {
-    const name = (modal.querySelector('#np-name').value ?? '').trim();
-    const species = (modal.querySelector('#np-species').value ?? '').trim();
+  const pick = async (fromCamera) => {
+    const file = await pickImage({ fromCamera });
+    if (!file) return;
+    photoBlob = await compressImage(file);
+    showPreview();
+  };
+
+  const showPreview = () => {
+    const url = URL.createObjectURL(photoBlob);
+    body.innerHTML = `
+      <div class="sheet-header">
+        <h2>Nieuwe plant</h2>
+        <p>De AI herkent de soort en beoordeelt direct de gezondheid.</p>
+      </div>
+      <img class="preview-img" src="${url}" alt="Voorbeeld van de foto" />
+      <ion-button id="np-analyse" expand="block" size="large">Herken &amp; analyseer</ion-button>
+      <ion-button id="np-repick" expand="block" fill="clear" color="medium">Andere foto</ion-button>`;
+    body.querySelector('#np-analyse').addEventListener('click', analyse);
+    body.querySelector('#np-repick').addEventListener('click', () => {
+      URL.revokeObjectURL(url);
+      showPicker();
+    });
+  };
+
+  const analyse = async () => {
+    if (!isConfigured()) {
+      modal.dismiss();
+      const ok = await confirmAlert({
+        header: 'Azure AI nog niet ingesteld',
+        message: 'Vul eerst je Azure-endpoint en API-sleutel in bij Instellingen.',
+        confirmText: 'Naar instellingen',
+        color: 'primary',
+      });
+      if (ok) location.hash = '#/instellingen';
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="analyse-state">
+        <ion-spinner name="crescent" class="analyse-spinner"></ion-spinner>
+        <h2>Herkennen</h2>
+        <p id="analyse-text">${ANALYSE_TEXTS[0]}</p>
+      </div>`;
+    let i = 0;
+    rotator = setInterval(() => {
+      const el = body.querySelector('#analyse-text');
+      if (el) el.textContent = ANALYSE_TEXTS[++i % ANALYSE_TEXTS.length];
+    }, 2200);
+
+    try {
+      const dataUrl = await blobToDataUrl(photoBlob);
+      analysis = await analyzePlant(dataUrl);
+      clearInterval(rotator);
+      showResult();
+    } catch (err) {
+      clearInterval(rotator);
+      showError(err);
+    }
+  };
+
+  const showResult = () => {
+    const url = URL.createObjectURL(photoBlob);
+    body.innerHTML = `
+      <div class="sheet-header"><h2>Herkend</h2></div>
+      <div class="surface-card identify-card">
+        <img src="${url}" alt="" />
+        <div class="identify-info">
+          <span class="identify-label">Soort</span>
+          <strong>${esc(analysis.plantsoort || 'Niet herkend')}</strong>
+          ${statusLine(analysis)}
+        </div>
+        ${scorePill(analysis)}
+      </div>
+      <ion-input id="np-name" class="modern" label="Naam" label-placement="floating" fill="outline"
+        value="${esc(suggestPlantName(analysis.plantsoort))}" maxlength="60" autocapitalize="sentences"></ion-input>
+      <ion-button id="np-save" expand="block" size="large">Plant opslaan</ion-button>
+      <ion-button id="np-repick" expand="block" fill="clear" color="medium">Andere foto</ion-button>`;
+    body.querySelector('#np-save').addEventListener('click', () => save(analysis));
+    body.querySelector('#np-repick').addEventListener('click', () => {
+      URL.revokeObjectURL(url);
+      showPicker();
+    });
+  };
+
+  const showError = (err) => {
+    body.innerHTML = `
+      <div class="analyse-state">
+        <div class="icon-circle danger"><ion-icon name="alert-circle-outline"></ion-icon></div>
+        <h2>Herkennen mislukt</h2>
+        <p class="error-text">${esc(err.message)}</p>
+      </div>
+      <ion-input id="np-name" class="modern" label="Naam" label-placement="floating" fill="outline"
+        placeholder="Geef zelf een naam" maxlength="60" autocapitalize="sentences"></ion-input>
+      <ion-button id="np-retry" expand="block">Opnieuw proberen</ion-button>
+      <ion-button id="np-save-manual" expand="block" fill="outline">Opslaan zonder analyse</ion-button>`;
+    body.querySelector('#np-retry').addEventListener('click', analyse);
+    body.querySelector('#np-save-manual').addEventListener('click', () => save(null));
+  };
+
+  const save = async (withAnalysis) => {
+    const name = (body.querySelector('#np-name')?.value ?? '').trim();
     if (!name) {
       toast('Geef je plant een naam', 'warning');
       return;
     }
-    const plant = await db.addPlant({ name, species });
+    const plant = await db.addPlant({ name, species: withAnalysis?.plantsoort ?? '' });
+    await db.addEntry({ plantId: plant.id, photo: photoBlob, analysis: withAnalysis });
     await modal.dismiss();
+    toast('Plant toegevoegd', 'success');
     location.hash = `#/plant/${plant.id}`;
-    // Direct door naar de eerste foto: toevoegen → foto → analyse → opvolgen
-    openAnalyseSheet(plant);
-  });
+  };
+
+  showPicker();
 }
 
 async function renderPlantDetail(id) {
@@ -368,11 +485,11 @@ async function renderPlantDetail(id) {
         ${scoreRing(latest?.analysis?.gezondheidsscore ?? null)}
         <div class="hero-info">
           ${statusLine(latest?.analysis)}
-          ${trendLine(entries)}
           ${sparkline(scoresChrono)}
           ${latest ? `<span class="hero-date">Laatste check: ${formatDate(latest.createdAt)}</span>` : ''}
         </div>
       </div>
+      ${statRow(entries)}
 
       <div class="ion-padding-horizontal">
         <ion-button id="btn-analyse" expand="block" size="large">
@@ -469,6 +586,7 @@ function openPlantOptions(plant) {
 /* ---------- analyse-flow ---------- */
 
 const ANALYSE_TEXTS = [
+  'Soort herkennen…',
   'Bladeren bekijken…',
   'Kleur en structuur beoordelen…',
   'Symptomen vergelijken…',
@@ -639,14 +757,17 @@ function renderSettings() {
       <ion-list inset>
         <ion-list-header><ion-label>Azure AI</ion-label></ion-list-header>
         <ion-item>
+          <ion-icon slot="start" name="globe-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-endpoint" label="Endpoint" label-placement="stacked" type="url" inputmode="url"
             placeholder="https://mijn-resource.openai.azure.com" value="${esc(s.endpoint)}" autocapitalize="off"></ion-input>
         </ion-item>
         <ion-item>
+          <ion-icon slot="start" name="cube-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-deployment" label="Deployment (model)" label-placement="stacked"
             placeholder="gpt-4.1-mini" value="${esc(s.deployment)}" autocapitalize="off"></ion-input>
         </ion-item>
         <ion-item>
+          <ion-icon slot="start" name="key-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-key" label="API-sleutel" label-placement="stacked" type="password"
             placeholder="••••••••" value="${esc(s.apiKey)}" autocapitalize="off"></ion-input>
           <ion-button id="toggle-key" slot="end" fill="clear" aria-label="Toon sleutel">
@@ -654,6 +775,7 @@ function renderSettings() {
           </ion-button>
         </ion-item>
         <ion-item>
+          <ion-icon slot="start" name="options-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-version" label="API-versie" label-placement="stacked"
             value="${esc(s.apiVersion)}" autocapitalize="off"></ion-input>
         </ion-item>

@@ -161,8 +161,31 @@ ion-fab-button {
   font-size: 15px;
   color: var(--ion-color-medium);
 }
-.login-wrap .surface-card {
-  padding: 14px 16px 16px;
+/* ====== moderne formuliervelden ====== */
+
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-stack ion-button {
+  margin-top: 6px;
+}
+ion-input.modern {
+  --border-radius: 14px;
+  --border-color: rgba(24, 44, 34, 0.16);
+  --highlight-color-focused: var(--ion-color-primary);
+  --padding-start: 16px;
+  --padding-end: 16px;
+  min-height: 54px;
+}
+@media (prefers-color-scheme: dark) {
+  ion-input.modern {
+    --border-color: rgba(255, 255, 255, 0.18);
+  }
+}
+#add-body ion-input.modern {
+  margin-bottom: 16px;
 }
 
 /* ====== plantenlijst ====== */
@@ -386,8 +409,44 @@ ion-fab-button {
   fill: var(--ion-color-medium);
 }
 
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 0 20px 16px;
+}
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px;
+  box-shadow: none;
+}
+.stat-value {
+  font-size: 20px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ion-color-medium);
+}
+
 .timeline-item .score-pill {
   margin-left: 8px;
+}
+.timeline-item ion-label h3 {
+  font-size: 14.5px;
+  line-height: 1.35;
+}
+.timeline-item ion-label p {
+  font-size: 12.5px;
+  margin-top: 3px;
 }
 
 /* ====== sheets ====== */
@@ -411,8 +470,46 @@ ion-fab-button {
   color: var(--ion-color-medium);
 }
 
-.form-list {
-  margin: 0 0 18px;
+.identify-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.identify-card > img {
+  width: 62px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 14px;
+  flex-shrink: 0;
+}
+.identify-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.identify-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ion-color-medium);
+}
+.identify-info strong {
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.identify-info .status-line {
+  font-size: 13px;
+}
+.identify-card .score-pill {
+  flex-shrink: 0;
 }
 
 .pick-option {
@@ -560,6 +657,13 @@ ion-fab-button {
 .li-ok { color: var(--ion-color-success); }
 
 /* ====== instellingen ====== */
+
+ion-item ion-icon[slot='start'] {
+  color: var(--ion-color-medium);
+  font-size: 20px;
+  margin-inline-end: 14px;
+  align-self: center;
+}
 
 .info-card {
   display: flex;
