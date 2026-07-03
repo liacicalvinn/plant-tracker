@@ -836,13 +836,24 @@ function renderSettings() {
     reasoning: app.querySelector('#set-reasoning').value || 'medium',
   });
 
+  // Toon na het opslaan de genormaliseerde waarden (bijv. een geplakte
+  // "Target URI" wordt uitgesplitst in endpoint + deployment + api-versie).
+  const syncForm = () => {
+    const saved = getSettings();
+    app.querySelector('#set-endpoint').value = saved.endpoint;
+    app.querySelector('#set-deployment').value = saved.deployment;
+    app.querySelector('#set-version').value = saved.apiVersion;
+  };
+
   app.querySelector('#btn-save').addEventListener('click', () => {
     saveSettings(readForm());
+    syncForm();
     toast('Instellingen opgeslagen', 'success');
   });
 
   app.querySelector('#btn-test').addEventListener('click', async () => {
     saveSettings(readForm());
+    syncForm();
     const btn = app.querySelector('#btn-test');
     btn.disabled = true;
     btn.innerHTML = '<ion-spinner name="dots"></ion-spinner>';
