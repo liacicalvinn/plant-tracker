@@ -38,7 +38,17 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        // update() dwingt een check op een nieuwe sw.js af bij elke start
+        navigator.serviceWorker.register('sw.js')
+          .then((reg) => reg.update())
+          .catch(() => {});
+      });
+      // Zodra een nieuwe versie de controle overneemt: één keer herladen,
+      // zodat de gebruiker direct de nieuwste app ziet (niet pas de 2e keer).
+      let hadController = Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) { hadController = true; return; } // eerste installatie
+        window.location.reload();
       });
     }
   </script>
