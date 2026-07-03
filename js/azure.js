@@ -1,18 +1,29 @@
 // Azure OpenAI-integratie. De instellingen (endpoint, deployment, sleutel) worden
 // uitsluitend in localStorage van dit toestel bewaard — nooit in de publieke repo.
+//
+// Ondersteunt reasoning-modellen (gpt-5-serie, o-serie): die "denken" eerst na
+// (reasoning_effort) en hebben daarvoor een ruim max_completion_tokens-budget
+// nodig, omdat denktokens meetellen in dat budget.
 
 const SETTINGS_KEY = 'pg_azure';
 
 export const DEFAULT_SETTINGS = {
   endpoint: '',
-  deployment: 'gpt-4.1-mini',
-  apiVersion: '2024-10-21',
+  deployment: 'gpt-5.4-mini',
+  apiVersion: 'v1',
   apiKey: '',
+  reasoning: 'medium',
 };
+
+// Oudere installaties hadden deze api-versie als standaard; de v1-API is nodig
+// voor de nieuwste (reasoning-)modellen, dus migreren we die stilzwijgend.
+const LEGACY_DEFAULT_API_VERSION = '2024-10-21';
 
 export function getSettings() {
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (stored.apiVersion === LEGACY_DEFAULT_API_VERSION) delete stored.apiVersion;
+    return { ...DEFAULT_SETTINGS, ...stored };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -27,12 +38,24 @@ export function isConfigured() {
   return Boolean(s.endpoint && s.deployment && s.apiKey);
 }
 
+export function isReasoningModel(deployment = getSettings().deployment) {
+  return /(gpt-5|(^|[^a-z0-9])o\d)/i.test(deployment);
+}
+
+function usesV1Api(s) {
+  return (s.apiVersion || 'v1').trim() === 'v1';
+}
+
 function buildUrl(s) {
   const endpoint = s.endpoint.trim().replace(/\/+$/, '');
+  if (usesV1Api(s)) {
+    return `${endpoint}/openai/v1/chat/completions`;
+  }
   return `${endpoint}/openai/deployments/${encodeURIComponent(s.deployment.trim())}/chat/completions?api-version=${encodeURIComponent(s.apiVersion.trim())}`;
 }
 
 const SYSTEM_PROMPT = `Je bent een ervaren botanist en plantendokter. Je analyseert een foto van een kamerplant of tuinplant en beoordeelt de gezondheid.
+Denk eerst zorgvuldig na over alles wat er op de foto te zien is (soortkenmerken, bladkleur, vlekken, structuur, potgrond, standplaats) voordat je oordeelt.
 Antwoord UITSLUITEND met geldige JSON (geen markdown, geen toelichting) in exact deze structuur:
 {
   "plantsoort": "vermoedelijke soort (Nederlandse naam, evt. Latijnse naam erbij)",
@@ -52,20 +75,26 @@ async function chat(messages, maxTokens) {
     throw new Error('Azure AI is nog niet ingesteld. Ga naar Instellingen.');
   }
 
-  const body = {
-    messages,
-    max_tokens: maxTokens,
-    temperature: 0.2,
-  };
+  const base = usesV1Api(s) ? { model: s.deployment.trim(), messages } : { messages };
+  const reasoning = isReasoningModel(s.deployment);
 
-  let response = await postJson(buildUrl(s), s.apiKey, body);
+  // Modern verzoek: max_completion_tokens + denk-niveau voor reasoning-modellen.
+  // Reasoning-modellen accepteren alleen de standaardtemperatuur.
+  const modern = { ...base, max_completion_tokens: maxTokens };
+  if (reasoning) {
+    if (s.reasoning) modern.reasoning_effort = s.reasoning;
+  } else {
+    modern.temperature = 0.2;
+  }
 
-  // Nieuwere modellen (o.a. gpt-5-serie) accepteren alleen max_completion_tokens.
+  let response = await postJson(buildUrl(s), s.apiKey, modern);
+
   if (!response.ok) {
     const errText = await response.text();
-    if (/max_tokens|max_completion_tokens|temperature/i.test(errText)) {
-      const retryBody = { messages, max_completion_tokens: maxTokens };
-      response = await postJson(buildUrl(s), s.apiKey, retryBody);
+    // Oudere api-versies/modellen kennen max_completion_tokens of reasoning_effort niet
+    if (/max_completion_tokens|reasoning_effort|unrecognized|unsupported|unknown parameter/i.test(errText)) {
+      const legacy = { ...base, max_tokens: maxTokens, temperature: 0.2 };
+      response = await postJson(buildUrl(s), s.apiKey, legacy);
       if (!response.ok) throw await httpError(response);
     } else {
       throw httpErrorFromText(response.status, errText);
@@ -74,8 +103,13 @@ async function chat(messages, maxTokens) {
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Het AI-model gaf een leeg antwoord terug.');
-  return content;
+  if (!content || !content.trim()) {
+    const finish = data?.choices?.[0]?.finish_reason;
+    throw new Error(finish === 'length'
+      ? 'Het denkbudget raakte op voordat er een antwoord kwam. Zet het denk-niveau lager in Instellingen en probeer opnieuw.'
+      : 'Het AI-model gaf een leeg antwoord terug.');
+  }
+  return { content, usage: data?.usage ?? null };
 }
 
 function postJson(url, apiKey, body) {
@@ -152,7 +186,8 @@ export async function analyzePlant(photoDataUrl, plantName = '') {
     ? `Analyseer de gezondheid van deze plant. De eigenaar noemt hem "${plantName}".`
     : 'Analyseer de gezondheid van deze plant.';
 
-  const content = await chat(
+  // Ruim budget: bij reasoning-modellen tellen de denktokens hierin mee.
+  const { content, usage } = await chat(
     [
       { role: 'system', content: SYSTEM_PROMPT },
       {
@@ -163,15 +198,22 @@ export async function analyzePlant(photoDataUrl, plantName = '') {
         ],
       },
     ],
-    900,
+    5000,
   );
-  return parseAnalysis(content);
+
+  const analysis = parseAnalysis(content);
+  const denktokens = usage?.completion_tokens_details?.reasoning_tokens;
+  if (Number.isFinite(denktokens) && denktokens > 0) {
+    analysis.denktokens = denktokens;
+    analysis.denkniveau = getSettings().reasoning;
+  }
+  return analysis;
 }
 
 export async function testConnection() {
-  const content = await chat(
+  const { content } = await chat(
     [{ role: 'user', content: 'Antwoord met precies één woord: OK' }],
-    20,
+    1000,
   );
   return content.trim();
 }
