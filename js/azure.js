@@ -29,8 +29,29 @@ export function getSettings() {
   }
 }
 
+// Gebruikers plakken vaak de volledige "Target URI" uit de Azure Portal in het
+// endpointveld. Haal daar automatisch het basis-endpoint, de deploymentnaam en
+// de api-versie uit, zodat elke variant gewoon werkt.
+export function normalizeSettings(settings) {
+  const out = { ...settings };
+  let raw = (out.endpoint || '').trim();
+  if (raw && !/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+  try {
+    const url = new URL(raw);
+    out.endpoint = url.origin;
+    const dep = url.pathname.match(/\/deployments\/([^/]+)/i);
+    if (dep) out.deployment = decodeURIComponent(dep[1]);
+    const apiVersion = url.searchParams.get('api-version');
+    if (apiVersion) out.apiVersion = apiVersion;
+    else if (/\/openai\/v1\//i.test(url.pathname)) out.apiVersion = 'v1';
+  } catch {
+    out.endpoint = raw;
+  }
+  return out;
+}
+
 export function saveSettings(settings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)));
 }
 
 export function isConfigured() {
@@ -87,14 +108,14 @@ async function chat(messages, maxTokens) {
     modern.temperature = 0.2;
   }
 
-  let response = await postJson(buildUrl(s), s.apiKey, modern);
+  let response = await post(buildUrl(s), s.apiKey, modern);
 
   if (!response.ok) {
     const errText = await response.text();
     // Oudere api-versies/modellen kennen max_completion_tokens of reasoning_effort niet
     if (/max_completion_tokens|reasoning_effort|unrecognized|unsupported|unknown parameter/i.test(errText)) {
       const legacy = { ...base, max_tokens: maxTokens, temperature: 0.2 };
-      response = await postJson(buildUrl(s), s.apiKey, legacy);
+      response = await post(buildUrl(s), s.apiKey, legacy);
       if (!response.ok) throw await httpError(response);
     } else {
       throw httpErrorFromText(response.status, errText);
@@ -112,15 +133,27 @@ async function chat(messages, maxTokens) {
   return { content, usage: data?.usage ?? null };
 }
 
-function postJson(url, apiKey, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify(body),
-  });
+// "Load failed"/"Failed to fetch" betekent: geen antwoord gekregen (verkeerde
+// URL, geen internet of CORS) — vertaal dat naar een bruikbare melding.
+const NETWORK_ERROR =
+  'Kon Azure niet bereiken (netwerk- of CORS-fout). Controleer het endpoint in Instellingen — '
+  + 'het moet er zo uitzien: https://<naam>.openai.azure.com. '
+  + 'Tip: plak gerust de volledige "Target URI" uit Azure in het endpointveld; de app haalt de juiste gegevens er zelf uit. '
+  + 'Controleer ook je internetverbinding.';
+
+async function post(url, apiKey, body) {
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(NETWORK_ERROR);
+  }
 }
 
 async function httpError(response) {
