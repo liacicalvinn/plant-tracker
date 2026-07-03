@@ -29,9 +29,9 @@ Azure AI-gebruik per analyse.
 ### 2. Azure AI instellen
 
 1. Maak in de [Azure Portal](https://portal.azure.com) een **Azure OpenAI**-resource
-2. Deploy daarin (via Azure AI Foundry) een goedkoop vision-model, bijv. **`gpt-4.1-mini`** of `gpt-4o-mini`
+2. Deploy daarin (via Azure AI Foundry) een goedkoop vision-model met redeneervermogen, bijv. **`gpt-5.4-mini`** (oudere modellen als `gpt-4.1-mini` werken ook)
 3. Kopieer van de resource het **endpoint** (`https://<naam>.openai.azure.com`) en **sleutel 1**
-4. Open de app → log in → ⚙️ **Instellingen** → vul endpoint, deploymentnaam en sleutel in → **Opslaan** → **Test verbinding**
+4. Open de app → log in → ⚙️ **Instellingen** → vul endpoint, deploymentnaam en sleutel in, kies het **denk-niveau** → **Opslaan** → **Test verbinding**
 
 > 🔒 De sleutel wordt alleen in de browseropslag van jouw toestel bewaard en staat
 > nooit in deze (publieke) repository.
@@ -54,7 +54,7 @@ een echte app.
 |---|---|
 | UI | [Ionic](https://ionicframework.com) web components, zelf gehost in `vendor/` — geen build-stap of CDN nodig |
 | Opslag | IndexedDB (foto's als gecomprimeerde blobs) + localStorage (instellingen) |
-| AI | Azure OpenAI *chat completions* met vision, rechtstreeks vanuit de browser |
+| AI | Azure OpenAI *chat completions* (v1-API) met vision, rechtstreeks vanuit de browser; reasoning-modellen (gpt-5/o-serie) denken eerst na met instelbaar denk-niveau |
 | Hosting | GitHub Pages (statisch, gratis) |
 | Offline | Service worker met app-shell-cache |
 

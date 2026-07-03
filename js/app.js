@@ -588,8 +588,9 @@ function openPlantOptions(plant) {
 const ANALYSE_TEXTS = [
   'Soort herkennen…',
   'Bladeren bekijken…',
+  'Diep nadenken over de symptomen…',
   'Kleur en structuur beoordelen…',
-  'Symptomen vergelijken…',
+  'Mogelijke oorzaken afwegen…',
   'Verzorgingsadvies opstellen…',
   'Bijna klaar…',
 ];
@@ -722,7 +723,10 @@ function openEntryDetail(entry, plant) {
       ${a ? `
         <div class="surface-card hero-card compact">
           ${scoreRing(a.gezondheidsscore, 92)}
-          <div class="hero-info">${statusLine(a)}</div>
+          <div class="hero-info">
+            ${statusLine(a)}
+            ${a.denktokens ? `<span class="think-note"><ion-icon name="bulb-outline"></ion-icon>AI redeneerde ${a.denktokens.toLocaleString('nl-NL')} denktokens${a.denkniveau ? ` (niveau: ${esc(a.denkniveau)})` : ''}</span>` : ''}
+          </div>
         </div>
         ${a.diagnose ? `<h3 class="entry-h">Diagnose</h3><p class="entry-text">${esc(a.diagnose)}</p>` : ''}
         ${a.problemen.length ? `
@@ -764,7 +768,17 @@ function renderSettings() {
         <ion-item>
           <ion-icon slot="start" name="cube-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-deployment" label="Deployment (model)" label-placement="stacked"
-            placeholder="gpt-4.1-mini" value="${esc(s.deployment)}" autocapitalize="off"></ion-input>
+            placeholder="gpt-5.4-mini" value="${esc(s.deployment)}" autocapitalize="off"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-icon slot="start" name="bulb-outline" aria-hidden="true"></ion-icon>
+          <ion-select id="set-reasoning" label="Denk-niveau (AI-redenering)" label-placement="stacked"
+            interface="popover" value="${esc(s.reasoning)}">
+            <ion-select-option value="minimal">Minimaal — snelst</ion-select-option>
+            <ion-select-option value="low">Laag</ion-select-option>
+            <ion-select-option value="medium">Gemiddeld — aanbevolen</ion-select-option>
+            <ion-select-option value="high">Hoog — grondigst</ion-select-option>
+          </ion-select>
         </ion-item>
         <ion-item>
           <ion-icon slot="start" name="key-outline" aria-hidden="true"></ion-icon>
@@ -777,7 +791,7 @@ function renderSettings() {
         <ion-item>
           <ion-icon slot="start" name="options-outline" aria-hidden="true"></ion-icon>
           <ion-input id="set-version" label="API-versie" label-placement="stacked"
-            value="${esc(s.apiVersion)}" autocapitalize="off"></ion-input>
+            placeholder="v1" value="${esc(s.apiVersion)}" autocapitalize="off"></ion-input>
         </ion-item>
       </ion-list>
 
@@ -793,7 +807,7 @@ function renderSettings() {
         </div>
         <div class="info-row">
           <ion-icon name="information-circle-outline"></ion-icon>
-          <p>Maak in de <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a> een <em>Azure OpenAI</em>-resource, deploy een goedkoop vision-model (bijv. <code>gpt-4.1-mini</code>) en kopieer endpoint en sleutel hierheen.</p>
+          <p>Maak in de <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a> een <em>Azure OpenAI</em>-resource, deploy een goedkoop vision-model (bijv. <code>gpt-5.4-mini</code>) en kopieer endpoint en sleutel hierheen. Bij gpt-5/o-modellen denkt de AI eerst na; het denk-niveau bepaalt hoe grondig.</p>
         </div>
       </div>
 
@@ -818,7 +832,8 @@ function renderSettings() {
     endpoint: (app.querySelector('#set-endpoint').value ?? '').trim(),
     deployment: (app.querySelector('#set-deployment').value ?? '').trim(),
     apiKey: (app.querySelector('#set-key').value ?? '').trim(),
-    apiVersion: (app.querySelector('#set-version').value ?? '').trim() || '2024-10-21',
+    apiVersion: (app.querySelector('#set-version').value ?? '').trim() || 'v1',
+    reasoning: app.querySelector('#set-reasoning').value || 'medium',
   });
 
   app.querySelector('#btn-save').addEventListener('click', () => {
