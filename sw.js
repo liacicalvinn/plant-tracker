@@ -40,6 +40,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== location.origin) return;
+  if (url.pathname.includes('/bekken/')) return; // aparte app met eigen service worker
 
   // Navigatie: network-first zodat updates direct binnenkomen, offline fallback naar cache
   if (request.mode === 'navigate') {
