@@ -5,6 +5,8 @@ import {
 } from './data.js';
 import * as S from './store.js';
 import { startPlayer } from './player.js';
+import { figuurSvg, standLabels, startAnimaties } from './figuur.js';
+import { IC } from './icons.js';
 
 const root = document.getElementById('app');
 let tab = 'vandaag';
@@ -14,119 +16,120 @@ let importFout = '';
 
 const nu = () => new Date();
 const vandaagKey = () => S.dagSleutel();
-
-// ---------- kleine hulpjes ----------
-
-function ring(frac, binnen, klasse = '') {
-  const C = 2 * Math.PI * 54;
-  return `<div class="ring ${klasse}"><svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
-    <circle class="ring-fg" cx="60" cy="60" r="54" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - frac)}"/></svg>
-    <div class="ring-t">${binnen}</div></div>`;
-}
-
-const lijst = (a, tag = 'ul') => `<${tag}>${a.map((x) => `<li>${x}</li>`).join('')}</${tag}>`;
-
-function dagGroet() {
-  const u = nu().getHours();
-  const g = u < 6 ? 'Goedenacht' : u < 12 ? 'Goedemorgen' : u < 18 ? 'Goedemiddag' : 'Goedenavond';
-  return g;
-}
+const lijst = (a, cls) => `<ul class="${cls}">${a.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+const MOOD = { 1: 'zwaar', 3: 'goed', 5: 'sterk' };
 
 // ---------- weergaven ----------
 
-function routineKaart(id, gepland) {
-  const r = ROUTINES[id];
-  const status = S.routineStatus(vandaagKey(), id);
-  const totaal = r.items.length;
-  const gedaan = Object.keys(status.exs).length;
-  return `<button class="card routine ${status.done ? 'done' : ''}" data-a="open" data-id="${id}" style="--rc:${r.kleur}">
-    <span class="r-emoji">${r.emoji}</span>
-    <span class="r-body"><b>${r.naam}</b><small>${routineMinuten(id)} min · ${totaal} oefeningen</small>
-      <span class="bar"><i style="width:${status.done ? 100 : (gedaan / totaal) * 100}%"></i></span></span>
-    <span class="r-state">${status.done ? '✓' : gedaan ? `${gedaan}/${totaal}` : '›'}</span></button>`;
+function weekStrook() {
+  const dagVanWeek = (nu().getDay() + 6) % 7; // ma = 0
+  const maandag = S.dagenGeleden(dagVanWeek);
+  const cellen = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(maandag.getFullYear(), maandag.getMonth(), maandag.getDate() + i);
+    const key = S.dagSleutel(d);
+    const klasse = [
+      S.heeftIets(key) ? 'done' : '',
+      S.geplandVoor(d).length ? 'plan' : '',
+      key === vandaagKey() ? 'vandaag' : '',
+    ].join(' ');
+    cellen.push(`<div class="${klasse}">${DAGEN[d.getDay()]}<span class="d">${S.heeftIets(key) ? IC.check : d.getDate()}</span></div>`);
+  }
+  return `<div class="week">${cellen.join('')}</div>`;
 }
 
-function bannerHtml() {
+function routineRij(id) {
+  const r = ROUTINES[id];
+  const status = S.routineStatus(vandaagKey(), id);
+  const gedaan = Object.keys(status.exs).length;
+  const totaal = r.items.length;
+  return `<button class="row" data-a="open" data-id="${id}">
+    <span class="grow"><span class="t">${r.naam}</span>
+      <span class="s">${routineMinuten(id)} min · ${totaal} oefeningen${!status.done && gedaan ? ` · ${gedaan} gedaan` : ''}</span></span>
+    ${status.done ? `<span class="circle on">${IC.check}</span>` : IC.chevron}</button>`;
+}
+
+function herinneringTekst() {
   const s = S.settings();
-  if (!s.reminderOn) return '';
-  const gepland = S.geplandVoor();
-  if (!gepland.length || S.dagKlaar(nu())) return '';
+  if (!s.reminderOn || !S.geplandVoor().length || S.dagKlaar(nu())) return '';
   const [h, m] = s.reminderTime.split(':').map(Number);
   const tijd = new Date(); tijd.setHours(h, m, 0, 0);
-  if (nu() < tijd) return '';
-  return `<div class="banner">⏰ Tijd om te oefenen! Je hebt vandaag nog ${gepland.filter((id) => !S.routineStatus(vandaagKey(), id).done).length} routine(s) te gaan.</div>`;
+  return nu() >= tijd ? `<div class="notice">Het is tijd om te oefenen.</div>` : '';
 }
 
 function viewVandaag() {
   const gepland = S.geplandVoor();
-  const klaar = gepland.filter((id) => S.routineStatus(vandaagKey(), id).done).length;
+  const open = gepland.filter((id) => !S.routineStatus(vandaagKey(), id).done);
   const st = S.streak();
   const anderen = Object.keys(ROUTINES).filter((id) => !gepland.includes(id));
-  const frac = gepland.length ? klaar / gepland.length : 0;
-  return `<div class="view">
-    <h1>${dagGroet()} 👋</h1>
-    <p class="muted">${DAGEN_LANG[nu().getDay()]} ${nu().toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })}</p>
-    ${bannerHtml()}
-    <div class="card hero">
-      ${ring(frac, gepland.length ? `<span>${klaar}/${gepland.length}</span><small>vandaag</small>` : '<span>🛌</span><small>rust</small>', 'sm')}
-      <div><b>${st > 0 ? `🔥 ${st} dag${st === 1 ? '' : 'en'} op rij` : 'Start vandaag je reeks'}</b>
-        <p class="muted">${gepland.length ? (klaar === gepland.length ? 'Alles klaar voor vandaag. Top! 🎉' : 'Pak je routine en begin.') : 'Vandaag geen vast schema. Doe gerust een mini-routine.'}</p></div>
-    </div>
-    ${gepland.length ? `<h3>Gepland voor vandaag</h3>${gepland.map((id) => routineKaart(id, true)).join('')}` : ''}
-    <h3>${gepland.length ? 'Extra' : 'Alle routines'}</h3>
-    ${anderen.map((id) => routineKaart(id, false)).join('')}
+  const sub = `${DAGEN_LANG[nu().getDay()]} ${nu().toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' })}`
+    + (st > 0 ? ` · ${st} ${st === 1 ? 'dag' : 'dagen'} op rij` : '');
+  const cta = open.length
+    ? `<div class="cta"><button class="btn" data-a="start" data-id="${open[0]}">Start ${ROUTINES[open[0]].naam}</button></div>`
+    : gepland.length ? `<p class="muted cta">Alles gedaan voor vandaag.</p>` : `<p class="muted cta">Vandaag staat er niets gepland. Een mini-routine kan altijd.</p>`;
+  return `<div class="page"><h1>Vandaag</h1><p class="sub">${sub}</p>
+    ${weekStrook()}${herinneringTekst()}${cta}
+    ${gepland.length ? `<h3 class="sect">Gepland</h3><div class="group">${gepland.map(routineRij).join('')}</div>` : ''}
+    <h3 class="sect">${gepland.length ? 'Extra' : 'Routines'}</h3><div class="group">${anderen.map(routineRij).join('')}</div>
   </div>`;
+}
+
+function oefRij(ex, id, status) {
+  const check = status
+    ? `<button class="circle ${status.exs[ex.id] ? 'on' : ''}" data-a="tick" data-id="${id}" data-ex="${ex.id}" aria-label="Afvinken">${status.exs[ex.id] ? IC.check : ''}</button>` : '';
+  return `<div class="row">${check}
+    <button class="row grow" style="padding:0;min-height:0;gap:14px" data-a="ex" data-ex="${ex.id}">
+      <span class="thumb">${figuurSvg(ex.id, { naam: ex.naam })}</span>
+      <span class="grow"><span class="t">${ex.naam}</span><span class="s">${dosering(ex)}</span></span>${status ? '' : IC.chevron}</button></div>`;
 }
 
 function viewRoutine(id) {
   const r = ROUTINES[id];
   const exs = routineOefeningen(id);
   const status = S.routineStatus(vandaagKey(), id);
-  return `<div class="view">
-    <button class="back" data-a="back">‹ Terug</button>
-    <h1>${r.emoji} ${r.naam}</h1>
-    <p class="muted">${routineMinuten(id)} min · ${exs.length} oefeningen</p>
-    <p>${r.omschrijving}</p>
-    <button class="btn big full" data-a="start" data-id="${id}">▶ Begeleid starten</button>
-    <p class="muted center small">Met timer en herhalingsteller. Of vink hieronder zelf af.</p>
-    <h3>Oefeningen</h3>
-    <div class="exlist">${exs.map((ex) => `
-      <div class="exrow ${status.exs[ex.id] ? 'ticked' : ''}">
-        <button class="check" data-a="tick" data-id="${id}" data-ex="${ex.id}" aria-label="Afvinken">${status.exs[ex.id] ? '✓' : ''}</button>
-        <button class="exinfo" data-a="ex" data-ex="${ex.id}"><b>${ex.emoji} ${ex.naam}</b><small>${dosering(ex)}</small></button>
-      </div>`).join('')}</div>
-    ${status.done || Object.keys(status.exs).length ? `<button class="link" data-a="reset" data-id="${id}">Vandaag opnieuw beginnen</button>` : ''}
+  return `<div class="page">
+    <button class="back" data-a="back">${IC.back}Terug</button>
+    <h1>${r.naam}</h1><p class="sub">${routineMinuten(id)} min · ${exs.length} oefeningen</p>
+    <p style="margin-top:14px">${r.omschrijving}</p>
+    <div class="cta"><button class="btn" data-a="start" data-id="${id}">${Object.keys(status.exs).length && !status.done ? 'Opnieuw beginnen' : 'Start'}</button></div>
+    <p class="muted small" style="margin-top:10px">Of vink hieronder zelf per oefening af.</p>
+    <h3 class="sect">Oefeningen</h3>
+    <div class="group">${exs.map((ex) => oefRij(ex, id, status)).join('')}</div>
+    ${status.done || Object.keys(status.exs).length ? `<button class="txt" style="margin-top:16px" data-a="reset" data-id="${id}">Vandaag opnieuw beginnen</button>` : ''}
   </div>`;
 }
 
 function viewOefeningen() {
-  return `<div class="view"><h1>Oefeningen</h1><p class="muted">Tik voor uitleg of om een oefening los te proberen.</p>
-    ${Object.entries(GROEPEN).map(([g, naam]) => `<h3>${naam}</h3><div class="exlist">
-      ${Object.entries(OEFENINGEN).filter(([, ex]) => ex.groep === g).map(([id, ex]) => `
-        <button class="card exlib" data-a="ex" data-ex="${id}"><span class="r-emoji">${ex.emoji}</span>
-        <span class="r-body"><b>${ex.naam}</b><small>${dosering(ex)}</small></span><span class="r-state">›</span></button>`).join('')}</div>`).join('')}
+  return `<div class="page"><h1>Oefeningen</h1><p class="sub">Tik voor uitleg en een voorbeeld.</p>
+    ${Object.entries(GROEPEN).map(([g, naam]) => `<h3 class="sect">${naam}</h3><div class="group">
+      ${Object.keys(OEFENINGEN).filter((id) => OEFENINGEN[id].groep === g).map((id) => oefRij(oefening({ id }), null, null)).join('')}</div>`).join('')}
   </div>`;
 }
 
 function sheetHtml(id) {
   const ex = oefening({ id });
   return `<div class="sheet-bg" data-a="sheet-bg"><div class="sheet">
-    <h3>${ex.emoji} ${ex.naam}</h3><p class="muted">${dosering(ex)}</p><p>${ex.doel}</p>
-    <h4>Zo doe je het</h4>${lijst(ex.stappen, 'ol')}
-    ${ex.tips?.length ? `<h4>Tips</h4>${lijst(ex.tips)}` : ''}
-    ${ex.fouten?.length ? `<h4>Veelgemaakte fouten</h4>${lijst(ex.fouten)}` : ''}
-    ${ex.makkelijker ? `<p><b>Makkelijker:</b> ${ex.makkelijker}</p>` : ''}
-    ${ex.moeilijker ? `<p><b>Moeilijker:</b> ${ex.moeilijker}</p>` : ''}
-    <button class="btn full" data-a="try" data-ex="${id}">▶ Probeer met timer</button>
-    <button class="btn ghost full" data-a="sheet-close">Sluiten</button></div></div>`;
+    <div class="sheet-top"><button class="icbtn" data-a="sheet-close" aria-label="Sluiten">${IC.close}</button></div>
+    <div class="sheet-body">
+      <div class="fig-card">${figuurSvg(id, { live: true, naam: ex.naam })}${standLabels(id)}</div>
+      <h2>${ex.naam}</h2><p class="muted">${dosering(ex)}</p>
+      <p class="kort">${ex.kort}</p>
+      <h4>Zo doe je het</h4><ol class="steps">${ex.stappen.map((x) => `<li><span>${x}</span></li>`).join('')}</ol>
+      ${ex.tips?.length ? `<h4>Tips</h4>${lijst(ex.tips, 'bul')}` : ''}
+      ${ex.fouten?.length ? `<h4>Let op</h4>${lijst(ex.fouten, 'bul')}` : ''}
+      ${ex.makkelijker ? `<h4>Makkelijker</h4><p class="muted">${ex.makkelijker}</p>` : ''}
+      ${ex.moeilijker ? `<h4>Moeilijker</h4><p class="muted">${ex.moeilijker}</p>` : ''}
+      <h4>Waarom</h4><p class="muted">${ex.doel}</p>
+    </div>
+    <div class="sheet-foot"><button class="btn" data-a="try" data-ex="${id}">Probeer met timer</button></div>
+  </div></div>`;
 }
 
 function viewVoortgang() {
   const tot = S.totalen();
   const st = S.streak();
-  // laatste 5 weken, maandag t/m zondag
   const vandaag = nu();
-  const dagVanWeek = (vandaag.getDay() + 6) % 7; // ma = 0
+  const dagVanWeek = (vandaag.getDay() + 6) % 7;
   const einde = S.dagenGeleden(-(6 - dagVanWeek));
   const cellen = [];
   for (let i = 34; i >= 0; i--) {
@@ -134,100 +137,90 @@ function viewVoortgang() {
     const key = S.dagSleutel(d);
     const n = Object.values(S.get().log[key] || {}).filter((r) => r.done).length;
     const toekomst = d > vandaag && key !== vandaagKey();
-    cellen.push(`<i class="cell l${Math.min(n, 3)} ${toekomst ? 'future' : ''} ${key === vandaagKey() ? 'today' : ''}" title="${key}"></i>`);
+    cellen.push(`<i class="cell l${Math.min(n, 2)} ${toekomst ? 'future' : ''} ${key === vandaagKey() ? 'today' : ''}" title="${key}"></i>`);
   }
   const dagen = Object.keys(S.get().log).sort().reverse().filter(S.heeftIets).slice(0, 8);
-  const smiley = ['', '😣', '😕', '😐', '🙂', '😄'];
-  return `<div class="view"><h1>Voortgang</h1>
-    <div class="stats">
-      <div class="stat"><b>${st}</b><small>dagen op rij</small></div>
-      <div class="stat"><b>${tot.sessies}</b><small>routines</small></div>
-      <div class="stat"><b>${tot.minuten}</b><small>minuten</small></div>
-    </div>
-    <h3>Laatste 5 weken</h3>
-    <div class="heat-days">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((d) => `<span>${d}</span>`).join('')}</div>
-    <div class="heat">${cellen.join('')}</div>
-    <h3>Recent</h3>
-    ${dagen.length ? dagen.map((k) => {
+  return `<div class="page"><h1>Voortgang</h1>
+    <div class="stats"><div><b>${st}</b><span>dagen op rij</span></div><div><b>${tot.sessies}</b><span>routines</span></div><div><b>${tot.minuten}</b><span>minuten</span></div></div>
+    <h3 class="sect">Laatste 5 weken</h3>
+    <div class="heat">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((d) => `<span class="h">${d}</span>`).join('')}${cellen.join('')}</div>
+    <h3 class="sect">Recent</h3>
+    ${dagen.length ? `<div class="group">${dagen.map((k) => {
       const rs = Object.entries(S.get().log[k]).filter(([, r]) => r.done);
-      return `<div class="card hist"><b>${S.dagVanSleutel(k).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short' })}</b>
-        <span>${rs.map(([id, r]) => `${ROUTINES[id]?.emoji || ''} ${ROUTINES[id]?.naam || id}${r.secs ? ` · ${Math.max(1, Math.round(r.secs / 60))} min` : ''}${r.mood ? ` ${smiley[r.mood]}` : ''}`).join('<br>')}</span></div>`;
-    }).join('') : '<p class="muted">Nog geen afgeronde routines. Begin vandaag! 💪</p>'}
-    <p class="muted small">Tip: maak elke 4 weken een foto van opzij (zelfde kleding, zelfde plek) om verschil te zien.</p>
+      return `<div class="row"><span class="grow"><span class="t">${S.dagVanSleutel(k).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+        <span class="s">${rs.map(([id, r]) => `${ROUTINES[id]?.naam || id}${r.secs ? ` · ${Math.max(1, Math.round(r.secs / 60))} min` : ''}${r.mood ? ` · ${MOOD[r.mood]}` : ''}`).join('<br>')}</span></span></div>`;
+    }).join('')}</div>` : '<p class="muted">Nog geen afgeronde routines.</p>'}
+    <p class="muted small" style="margin-top:20px">Tip: maak elke 4 weken een foto van opzij (zelfde kleding, zelfde plek) om verschil te zien.</p>
   </div>`;
 }
 
 function schemaEditor() {
   const s = S.settings().schema;
-  const volgorde = [1, 2, 3, 4, 5, 6, 0];
-  return volgorde.map((d) => `<div class="schemarij"><b>${DAGEN[d]}</b><div>${Object.entries(ROUTINES).map(([id, r]) =>
-    `<button class="pill ${(s[d] || []).includes(id) ? 'on' : ''}" data-a="schema" data-dag="${d}" data-id="${id}">${r.emoji} ${r.naam}</button>`).join('')}</div></div>`).join('');
+  return [1, 2, 3, 4, 5, 6, 0].map((d) => `<div class="schema"><b>${DAGEN_LANG[d][0].toUpperCase() + DAGEN_LANG[d].slice(1)}</b><div class="chips">${Object.entries(ROUTINES).map(([id, r]) =>
+    `<button class="chip ${(s[d] || []).includes(id) ? 'on' : ''}" data-a="schema" data-dag="${d}" data-id="${id}">${r.naam}</button>`).join('')}</div></div>`).join('');
 }
 
 const INFO = [
-  ['Wat is een anterieure bekkenkanteling?', `<p>Je bekken kantelt aan de voorkant naar beneden, waardoor je onderrug holler wordt en je buik naar voren komt. Vaak zie je een combinatie van <b>strakke heupbuigers en onderrugspieren</b> met <b>minder actieve bil- en buikspieren</b> (het "lower crossed syndrome"-idee).</p>
+  ['Wat is een anterieure bekkenkanteling?', `<p>Je bekken kantelt aan de voorkant naar beneden, waardoor je onderrug holler wordt en je buik naar voren komt. Vaak zie je een combinatie van <b>strakke heupbuigers en onderrugspieren</b> met <b>minder actieve bil- en buikspieren</b>.</p>
     <p>Een zekere kanteling is normaal. Het is geen ziekte, en zitgedrag, gewoontes en bouw spelen mee. Het doel is meer controle en een positie die je zonder moeite kunt aannemen.</p>`],
-  ['Wat zegt het onderzoek (eerlijk)', `<ul><li>Een meta-analyse van 23 gecontroleerde studies (2024) vond dat <b>krachttraining</b> posturale verbetering geeft en <b>beter werkt dan alleen rekken</b>. Rekken veranderde de houding niet. Voor de lage rug/het bekken specifiek was het effect niet significant.</li>
+  ['Wat zegt het onderzoek?', `<ul><li>Een meta-analyse van 23 gecontroleerde studies (2024) vond dat <b>krachttraining</b> posturale verbetering geeft en <b>beter werkt dan alleen rekken</b>. Voor de lage rug en het bekken specifiek was het effect niet significant.</li>
     <li>Een review over bekkenkanteling suggereert dat <b>buikspierversterking</b> de kanteling kan verminderen, maar de resultaten zijn gemengd.</li>
-    <li>Direct bewijs dat een bepaalde combinatie van oefeningen je bekkenhoek duurzaam verandert is <b>beperkt</b> (veel case reports en kleine studies). Oefenen helpt je wel sterker, soepeler en bewuster te bewegen.</li>
-    <li>Voor flexibiliteit: <b>30–60 seconden</b> per rek is goed onderbouwd; langer geeft meestal geen extra winst.</li></ul>`],
-  ['Zo is dit programma opgebouwd', `<ol><li><b>Ademhaling & ribben omlaag</b>: wie de ribben controleert, controleert de onderrug.</li>
-    <li><b>Strekken waar het strak zit</b>: heupbuigers, voorkant bovenbeen, met het bekken achterover tijdens de rek.</li>
-    <li><b>Versterken waar het zwak is</b>: billen, buikspieren (vooral onderste), hamstrings en zijkant van de heup.</li>
+    <li>Direct bewijs dat een vaste combinatie van oefeningen je bekkenhoek duurzaam verandert is <b>beperkt</b>. Oefenen helpt je wel sterker, soepeler en bewuster te bewegen.</li>
+    <li>Voor flexibiliteit is <b>30–60 seconden</b> per rek goed onderbouwd.</li></ul>`],
+  ['Hoe is dit programma opgebouwd?', `<ol><li><b>Bekkencontrole</b>: leer het bekken achterover te kantelen en aan te houden.</li>
+    <li><b>Strekken waar het strak zit</b>: heupbuigers en voorkant bovenbeen, met het bekken achterover tijdens de rek.</li>
+    <li><b>Versterken waar het zwak is</b>: billen, buikspieren, hamstrings en de zijkant van de heup.</li>
     <li><b>Overzetten naar staan</b>: muurhouding en kort herhalen over de dag.</li>
     <li><b>Heupmobiliteit</b>: in alle richtingen, zodat je heupen en niet je onderrug de beweging maken.</li></ol>
-    <p>Hamstrings zijn bij een kanteling vaak <b>lang en zwak</b>, niet strak. Daarom staat er hier geen hamstringrek, maar wel kracht (heupscharnier).</p>`],
-  ['Zelftests (2 minuten)', `<ul><li><b>Muurtest</b>: sta met hielen, billen en schouders tegen de muur. Past er meer dan een hand tussen onderrug en muur? Dan staat je onderrug hol.</li>
-    <li><b>Thomas-test</b>: zit op de rand van een bed, trek één knie naar je borst en ga achterover liggen. Hangt het andere been boven het bed omhoog, dan zijn je heupbuigers strak.</li>
+    <p>Hamstrings zijn bij een kanteling vaak lang en zwak, niet strak. Daarom staat er geen hamstringrek in, wel kracht.</p>`],
+  ['Zelftests', `<ul><li><b>Muurtest</b>: sta met hielen, billen en schouders tegen de muur. Past er meer dan een hand tussen onderrug en muur? Dan staat je onderrug hol.</li>
+    <li><b>Thomas-test</b>: zit op de rand van een bed, trek één knie naar je borst en ga achterover liggen. Hangt het andere been omhoog, dan zijn je heupbuigers strak.</li>
     <li><b>Foto van opzij</b>: kijk of je bekken voorover kantelt en ribben naar voren steken.</li></ul>`],
-  ['Wanneer naar een arts of fysiotherapeut?', `<p>Raadpleeg een professional bij pijn die uitstraalt naar been of billen, tintelingen/doof gevoel, krachtverlies, pijn die 's nachts erger wordt of na enkele weken niet beter wordt, of scherpe pijn in de lies tijdens heupbewegingen. Rek alleen tot <b>milde spanning</b>, nooit pijn.</p>
-    <p class="muted small">Deze app is een hulpmiddel en geen medisch advies.</p>`],
-  ['Verwachtingen', `<p>Kracht en bewustzijn merk je na enkele weken van regelmatig oefenen. Zichtbare of voelbare verandering in je houding duurt vaak maanden. Dagelijks kort oefenen werkt beter dan af en toe lang.</p>`],
+  ['Wanneer naar een arts of fysiotherapeut?', `<p>Bij pijn die uitstraalt naar been of billen, tintelingen of doof gevoel, krachtverlies, pijn die 's nachts erger wordt of na enkele weken niet beter wordt, of scherpe pijn in de lies tijdens heupbewegingen. Rek alleen tot <b>milde spanning</b>, nooit pijn.</p>
+    <p>Deze app is een hulpmiddel en geen medisch advies.</p>`],
 ];
 
 function viewMeer() {
   const s = S.settings();
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
-  return `<div class="view"><h1>Meer</h1>
-    <h3>Herinnering</h3>
-    <div class="card form">
-      <label class="rij"><span>Dagelijkse herinnering</span><input type="checkbox" class="tgl" data-set="reminderOn" ${s.reminderOn ? 'checked' : ''}/></label>
-      <label class="rij"><span>Tijdstip</span><input type="time" data-set="reminderTime" value="${s.reminderTime}"/></label>
-      <button class="btn full" data-a="ics">📅 Dagelijkse melding in je agenda zetten</button>
-      <p class="muted small">Dit is de <b>betrouwbaarste</b> manier: je agenda stuurt elke dag een melding, ook als de app dicht is. Open het gedownloade .ics-bestand en voeg toe aan je agenda.</p>
-      ${perm === 'default' ? `<button class="btn ghost full" data-a="notif">🔔 Meldingen in de app toestaan</button>` : ''}
-      ${perm === 'granted' ? `<button class="btn ghost full" data-a="testnotif">🔔 Testmelding sturen</button>` : ''}
-      ${perm === 'denied' ? '<p class="muted small">Meldingen zijn geblokkeerd in je browserinstellingen.</p>' : ''}
-      <p class="muted small">Een webapp kan zichzelf niet betrouwbaar op de achtergrond wekken. Als de app opent na het ingestelde tijdstip en je nog niet klaar bent, krijg je een melding en een banner.</p>
+  return `<div class="page"><h1>Instellingen</h1>
+    <h3 class="sect">Herinnering</h3>
+    <div class="group">
+      <label class="row"><span class="grow t">Dagelijkse herinnering</span><input type="checkbox" class="tgl" data-set="reminderOn" ${s.reminderOn ? 'checked' : ''}/></label>
+      <label class="row"><span class="grow t">Tijdstip</span><input type="time" data-set="reminderTime" value="${s.reminderTime}"/></label>
+      <button class="row" data-a="ics"><span class="grow"><span class="t">Zet in je agenda</span><span class="s">Betrouwbaarste optie: je agenda meldt elke dag, ook als de app dicht is.</span></span>${IC.chevron}</button>
+      ${perm === 'default' ? `<button class="row" data-a="notif"><span class="grow t">Meldingen toestaan</span>${IC.chevron}</button>` : ''}
+      ${perm === 'granted' ? `<button class="row" data-a="testnotif"><span class="grow t">Testmelding sturen</span>${IC.chevron}</button>` : ''}
     </div>
-    <h3>Tijdens het oefenen</h3>
-    <div class="card form">
-      <label class="rij"><span>Geluid (pieptonen)</span><input type="checkbox" class="tgl" data-set="sound" ${s.sound ? 'checked' : ''}/></label>
-      <label class="rij"><span>Trillen</span><input type="checkbox" class="tgl" data-set="vibrate" ${s.vibrate ? 'checked' : ''}/></label>
-      <label class="rij"><span>Automatisch doorgaan</span><input type="checkbox" class="tgl" data-set="auto" ${s.auto ? 'checked' : ''}/></label>
+    <p class="muted small" style="margin:8px 4px 0">Een webapp kan zichzelf niet betrouwbaar op de achtergrond wekken. Opent de app na het ingestelde tijdstip en ben je nog niet klaar, dan krijg je een melding${perm === 'denied' ? ' (meldingen zijn nu geblokkeerd in je browser)' : ''}.</p>
+    <h3 class="sect">Tijdens het oefenen</h3>
+    <div class="group">
+      <label class="row"><span class="grow t">Geluid</span><input type="checkbox" class="tgl" data-set="sound" ${s.sound ? 'checked' : ''}/></label>
+      <label class="row"><span class="grow t">Trillen</span><input type="checkbox" class="tgl" data-set="vibrate" ${s.vibrate ? 'checked' : ''}/></label>
+      <label class="row"><span class="grow t">Automatisch doorgaan</span><input type="checkbox" class="tgl" data-set="auto" ${s.auto ? 'checked' : ''}/></label>
     </div>
-    <h3>Weekschema</h3>
-    <div class="card form">${schemaEditor()}</div>
-    <h3>Over bekkenkanteling</h3>
-    ${INFO.map(([t, h]) => `<details class="card"><summary>${t}</summary>${h}</details>`).join('')}
-    <details class="card"><summary>Bronnen</summary><ul>${BRONNEN.map((b) => `<li><a href="${b.u}" target="_blank" rel="noopener">${b.t}</a></li>`).join('')}</ul></details>
-    <h3>Gegevens</h3>
-    <div class="card form">
-      <p class="muted small">Alles staat alleen op dit toestel. Maak af en toe een back-up.</p>
-      <button class="btn ghost full" data-a="export">⬇️ Back-up downloaden</button>
-      <label class="btn ghost full filebtn">⬆️ Back-up terugzetten<input type="file" accept="application/json" data-a="import" hidden/></label>
+    <h3 class="sect">Weekschema</h3>
+    <div class="group">${schemaEditor()}</div>
+    <h3 class="sect">Achtergrond</h3>
+    ${INFO.map(([t, h]) => `<details class="group"><summary>${t}</summary><div class="prose">${h}</div></details>`).join('')}
+    <details class="group"><summary>Bronnen</summary><div class="prose"><ul>${BRONNEN.map((b) => `<li><a href="${b.u}" target="_blank" rel="noopener">${b.t}</a></li>`).join('')}</ul></div></details>
+    <h3 class="sect">Gegevens</h3>
+    <div class="group">
+      <button class="row" data-a="export"><span class="grow t">Back-up downloaden</span>${IC.chevron}</button>
+      <label class="row filebtn"><span class="grow t">Back-up terugzetten</span>${IC.chevron}<input type="file" accept="application/json" data-a="import" hidden/></label>
       ${importFout ? `<p class="err">${importFout}</p>` : ''}
     </div>
+    <p class="muted small" style="margin:8px 4px 0">Alle gegevens staan alleen op dit toestel.</p>
   </div>`;
 }
 
 // ---------- render ----------
 
 const TABS = [
-  ['vandaag', '🏠', 'Vandaag'],
-  ['oefeningen', '📚', 'Oefeningen'],
-  ['voortgang', '📈', 'Voortgang'],
-  ['meer', '⚙️', 'Meer'],
+  ['vandaag', 'Vandaag'],
+  ['oefeningen', 'Oefeningen'],
+  ['voortgang', 'Voortgang'],
+  ['meer', 'Instellingen'],
 ];
 
 function render() {
@@ -238,10 +231,13 @@ function render() {
   else if (tab === 'voortgang') inhoud = viewVoortgang();
   else inhoud = viewMeer();
   const scroll = root.querySelector('.scroll')?.scrollTop || 0;
+  const open = [...root.querySelectorAll('details[open] summary')].map((s) => s.textContent);
   root.innerHTML = `<main class="scroll">${inhoud}</main>
-    <nav class="tabs">${TABS.map(([id, ic, naam]) => `<button class="${!detail && tab === id ? 'on' : ''}" data-a="tab" data-id="${id}"><span>${ic}</span>${naam}</button>`).join('')}</nav>
+    <nav class="tabs">${TABS.map(([id, naam]) => `<button class="${!detail && tab === id ? 'on' : ''}" data-a="tab" data-id="${id}">${IC[id === 'meer' ? 'instellingen' : id]}${naam}</button>`).join('')}</nav>
     ${sheet ? sheetHtml(sheet) : ''}`;
+  root.querySelectorAll('details').forEach((d) => { if (open.includes(d.querySelector('summary').textContent)) d.open = true; });
   root.querySelector('.scroll').scrollTop = scroll;
+  startAnimaties(root);
 }
 
 // ---------- acties ----------
@@ -265,6 +261,7 @@ function startRoutine(id) {
 
 function probeer(id) {
   sheet = null;
+  render();
   startPlayer({ titel: OEFENINGEN[id].naam, oefeningen: [oefening({ id })], instellingen: S.settings(), onSluit: () => render() });
 }
 
@@ -288,7 +285,7 @@ function maakIcs() {
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Bekken//NL', 'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT', 'UID:bekken-dagelijks@bekken-app', `DTSTAMP:${stempel}`,
     `DTSTART:${datum}T${h}${m}00`, 'DURATION:PT20M', 'RRULE:FREQ=DAILY',
-    'SUMMARY:🧘 Bekken- en heupoefeningen',
+    'SUMMARY:Bekken- en heupoefeningen',
     `DESCRIPTION:Tijd voor je dagelijkse routine. Open de app: ${link}`,
     `URL:${link}`,
     'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Tijd om te oefenen', 'TRIGGER:PT0M', 'END:VALARM',
@@ -312,7 +309,7 @@ function controleerHerinnering() {
   const tijd = new Date(); tijd.setHours(h, m, 0, 0);
   if (nu() >= tijd) {
     S.setLastNotified(vandaagKey());
-    toonMelding('Tijd om te oefenen 🧘', 'Je routine van vandaag wacht op je.');
+    toonMelding('Tijd om te oefenen', 'Je routine van vandaag wacht op je.');
   }
 }
 
@@ -342,7 +339,7 @@ document.addEventListener('click', (e) => {
     }
     case 'ics': download('bekken-herinnering.ics', maakIcs(), 'text/calendar'); break;
     case 'notif': Notification.requestPermission().then(render); break;
-    case 'testnotif': toonMelding('Testmelding 🔔', 'Zo ziet je herinnering eruit.'); break;
+    case 'testnotif': toonMelding('Testmelding', 'Zo ziet je herinnering eruit.'); break;
     case 'export': download(`bekken-backup-${vandaagKey()}.json`, S.exporteer(), 'application/json'); break;
   }
 });

@@ -1,6 +1,6 @@
 // Service worker: app-shell cache zodat de app direct en offline opent.
 
-const CACHE = 'bekken-v1';
+const CACHE = 'bekken-v3';
 
 const SHELL = [
   './',
@@ -10,6 +10,8 @@ const SHELL = [
   './js/data.js',
   './js/store.js',
   './js/player.js',
+  './js/figuur.js',
+  './js/icons.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
